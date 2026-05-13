@@ -1,0 +1,123 @@
+{
+  "name": "c-auto-config",
+  "displayName": "c auto config",
+  "description": "jrymonitorconfig",
+  "publisher": "cxy",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.118.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "repository": {
+  "type": "git",
+  "url": ""
+  },
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "c-auto-config.helloWorld",
+        "title": "Hello World"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "c-auto-config-sidebar",
+          "title": "c auto config",
+          "icon": "media/c_settings.svg"
+        }
+      ]
+    },
+    "views": {
+      "c-auto-config-sidebar": [
+        {
+          "type": "webview",
+          "id": "c-auto-config.webview",
+          "name": "配置生成器"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "C工程配置工具",
+      "properties": {
+        "cAutoConfig.cygwinPath": {
+          "type": "string",
+          "default": "D:\\cygwin\\bin\\bash.exe",
+          "description": "Cygwin 的 bash.exe 完整路径"
+        },
+        "cAutoConfig.clangdTemplate": {
+          "type": "object",
+          "default": {
+            "CompileFlags": {
+              "Add": [
+                "-fms-extensions",
+                "-fpermissive",
+                "-w",
+                "-ferror-limit=0",
+                "-Wno-unused-command-line-argument",
+                "-Wno-unknown-attributes",
+                "-Wno-invalid-token-paste",
+                "-Wno-undefined-identifier",
+                "-Wno-incomplete-type",
+                "-Wno-flexible-array-extensions",
+                "-Wno-unknown-pragmas",
+                "-Wno-implicit-function-declaration",
+                "-Wno-missing-prototypes",
+                "-Wno-unused-function",
+                "-D__aeon__",
+                "-D__aeonr2__",
+                "-Dxdata=",
+                "-Dcode=",
+                "-DMSOS_TYPE_NOS",
+                "-D__CLANGD__"
+              ]
+            },
+            "Remove": [
+              "-march=aeonR2",
+              "-march=*",
+              "-mhard-div",
+              "-mhard-mul",
+              "-mredzone-size=*"
+            ]
+          },
+          "markdownDescription": "clangd 配置文件的基础内容（将转换为 YAML 格式）。插件会自动添加 `If: PathExclude:` 块来排除非活动的 UI 文件夹。",
+          "scope": "resource"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.118.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.39.3",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.1"
+  }
+}
