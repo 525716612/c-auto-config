@@ -216,91 +216,112 @@ export async function updateClangdExclude(
 }
 // 更新 settings.json 中的 C_Cpp.files.exclude、search.exclude 以及 C_Cpp.default.systemIncludePath
 export async function updateSettingsExclude(
-	rootPath: string,
-	excludePaths: string[],
-	outputChannel?: vscode.OutputChannel,
+    rootPath: string,
+    excludePaths: string[],
+    projectType: string,  // 新增参数
+    outputChannel?: vscode.OutputChannel
 ): Promise<void> {
-	const vscodeDir = path.join(rootPath, ".vscode");
-	const settingsPath = path.join(vscodeDir, "settings.json");
-	if (!fs.existsSync(vscodeDir)) {
-		fs.mkdirSync(vscodeDir);
-	}
-	let settings: any = {};
-	if (fs.existsSync(settingsPath)) {
-		try {
-			const content = fs.readFileSync(settingsPath, "utf-8");
-			settings = JSON.parse(content);
-		} catch (err) {
-			/* 忽略 */
-		}
-	}
+    const vscodeDir = path.join(rootPath, '.vscode');
+    const settingsPath = path.join(vscodeDir, 'settings.json');
+    if (!fs.existsSync(vscodeDir)) {
+        fs.mkdirSync(vscodeDir);
+    }
+    let settings: any = {};
+    if (fs.existsSync(settingsPath)) {
+        try {
+            const content = fs.readFileSync(settingsPath, 'utf-8');
+            settings = JSON.parse(content);
+        } catch (err) { /* 忽略 */ }
+    }
 
-	// 1. C_Cpp.files.exclude（glob 模式）
-	if (!settings["C_Cpp.files.exclude"]) {settings["C_Cpp.files.exclude"] = {};}
-	const cppFilesExclude = settings["C_Cpp.files.exclude"];
-	for (const key of Object.keys(cppFilesExclude)) {
-		if (excludePaths.some((p) => key === `${p.replace(/\\/g, "/")}/**`)) {
-			delete cppFilesExclude[key];
-		}
-	}
-	for (const p of excludePaths) {
-		const normalized = p.replace(/\\/g, "/");
-		cppFilesExclude[`${normalized}/**`] = true;
-	}
-	settings["C_Cpp.files.exclude"] = cppFilesExclude;
+    // 1. 根据工程类型确定需要清理的基础路径前缀（插件可能管理过的排除规则）
+    const managedBasePaths: string[] = [];
 
-	// 2. search.exclude
-	if (!settings["search.exclude"]) {settings["search.exclude"] = {};}
-	const searchExclude = settings["search.exclude"];
-	for (const key of Object.keys(searchExclude)) {
-		if (excludePaths.some((p) => key === `${p.replace(/\\/g, "/")}/**`)) {
-			delete searchExclude[key];
-		}
-	}
-	for (const p of excludePaths) {
-		const normalized = p.replace(/\\/g, "/");
-		searchExclude[`${normalized}/**`] = true;
-	}
-	settings["search.exclude"] = searchExclude;
+    if (projectType === 'MST9U7') {
+        const commonRel = findRelativeFolder(rootPath, 'COMMON', 2);
+        if (commonRel) {
+            const osdRel = path.join(commonRel, 'OSD').replace(/\\/g, '/');
+            managedBasePaths.push(osdRel + '/');    // 例如 "COMMON/OSD/"
+        }
+        const customRel = findRelativeFolder(rootPath, 'CUSTOM', 3);
+        if (customRel) {
+            const mediatekBase = path.join(customRel, 'Mediatek').replace(/\\/g, '/');
+            managedBasePaths.push(mediatekBase + '/'); // "CUSTOM/Mediatek/"
+        }
+    } else if (projectType === 'MST9U6') {
+        const monitorApRel = findRelativeFolder(rootPath, 'monitor_ap', 3);
+        if (monitorApRel) {
+            const customRel = path.join(monitorApRel, 'CUSTOM').replace(/\\/g, '/');
+            managedBasePaths.push(customRel + '/'); // "monitor_ap/CUSTOM/"
+        }
+    } else if (projectType === '970X') {
+        const monitorApRel = findRelativeFolder(rootPath, 'monitor_ap', 3);
+        if (monitorApRel) {
+            const customRel = path.join(monitorApRel, 'CUSTOM').replace(/\\/g, '/');
+            managedBasePaths.push(customRel + '/'); // "monitor_ap/CUSTOM/"
+            const kernelSysRel = path.join(monitorApRel, 'KERNEL', 'SYSTEM').replace(/\\/g, '/');
+            managedBasePaths.push(kernelSysRel + '/'); // "monitor_ap/KERNEL/SYSTEM/"
+        }
+    }
 
-	// 3. C_Cpp.default.systemIncludePath（系统包含路径）
-	if (!settings["C_Cpp.default.systemIncludePath"])
-		{settings["C_Cpp.default.systemIncludePath"] = [];}
-	const currentSystemInclude = settings["C_Cpp.default.systemIncludePath"];
-	// 获取 Cygwin 头文件路径
-	const cygwinBashPath = vscode.workspace
-		.getConfiguration("cAutoConfig")
-		.get<string>("cygwinPath");
-	let includePaths: string[] = [];
-	if (cygwinBashPath) {
-		includePaths = getCygwinIncludePaths(cygwinBashPath);
-		if (includePaths.length > 0 && outputChannel) {
-			outputChannel.appendLine(
-				`[调试] 设置 C_Cpp.default.systemIncludePath: ${includePaths.join(", ")}`,
-			);
-		}
-	}
-	// 去重合并：保留用户原有的，追加我们新增的（不删除用户添加的其他路径）
-	const newSystemInclude = [...currentSystemInclude];
-	for (const incPath of includePaths) {
-		if (!newSystemInclude.includes(incPath)) {
-			newSystemInclude.push(incPath);
-		}
-	}
-	settings["C_Cpp.default.systemIncludePath"] = newSystemInclude;
+    // 辅助函数：删除以 managedBasePaths 中任意路径开头的排除键（且以 /** 结尾）
+    function clearManagedExcludes(excludeObj: any) {
+        for (const key of Object.keys(excludeObj)) {
+            const normalizedKey = key.replace(/\\/g, '/');
+            for (const base of managedBasePaths) {
+                if (normalizedKey.startsWith(base) && normalizedKey.endsWith('/**')) {
+                    delete excludeObj[key];
+                    break;
+                }
+            }
+        }
+    }
 
-	// 写回 settings.json
-	fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 4), "utf-8");
-	if (outputChannel) {
-		outputChannel.appendLine(`已更新 ${settingsPath}`);
-		outputChannel.appendLine(
-			`  C_Cpp.files.exclude: 添加了 ${excludePaths.length} 条 glob 规则`,
-		);
-		outputChannel.appendLine(
-			`  search.exclude: 添加了 ${excludePaths.length} 条 glob 规则`,
-		);
-		outputChannel.appendLine(
-			`  C_Cpp.default.systemIncludePath: 添加了 ${includePaths.length} 个路径`,
-		);
-	}
+    // 2. 清理并更新 C_Cpp.files.exclude
+    if (!settings['C_Cpp.files.exclude']) {settings['C_Cpp.files.exclude'] = {};}
+    const cppFilesExclude = settings['C_Cpp.files.exclude'];
+    clearManagedExcludes(cppFilesExclude);
+    for (const p of excludePaths) {
+        const normalized = p.replace(/\\/g, '/');
+        cppFilesExclude[`${normalized}/**`] = true;
+    }
+    settings['C_Cpp.files.exclude'] = cppFilesExclude;
+
+    // 3. 清理并更新 search.exclude
+    if (!settings['search.exclude']) {settings['search.exclude'] = {};}
+    const searchExclude = settings['search.exclude'];
+    clearManagedExcludes(searchExclude);
+    for (const p of excludePaths) {
+        const normalized = p.replace(/\\/g, '/');
+        searchExclude[`${normalized}/**`] = true;
+    }
+    settings['search.exclude'] = searchExclude;
+
+    // 4. C_Cpp.default.systemIncludePath（保持累加逻辑不变）
+    if (!settings['C_Cpp.default.systemIncludePath']) {settings['C_Cpp.default.systemIncludePath'] = [];}
+    const currentSystemInclude = settings['C_Cpp.default.systemIncludePath'];
+    const cygwinBashPath = vscode.workspace.getConfiguration('cAutoConfig').get<string>('cygwinPath');
+    let includePaths: string[] = [];
+    if (cygwinBashPath) {
+        includePaths = getCygwinIncludePaths(cygwinBashPath);
+        if (includePaths.length > 0 && outputChannel) {
+            outputChannel.appendLine(`[调试] 设置 C_Cpp.default.systemIncludePath: ${includePaths.join(', ')}`);
+        }
+    }
+    const newSystemInclude = [...currentSystemInclude];
+    for (const incPath of includePaths) {
+        if (!newSystemInclude.includes(incPath)) {
+            newSystemInclude.push(incPath);
+        }
+    }
+    settings['C_Cpp.default.systemIncludePath'] = newSystemInclude;
+
+    // 写回 settings.json
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 4), 'utf-8');
+    if (outputChannel) {
+        outputChannel.appendLine(`已更新 ${settingsPath}`);
+        outputChannel.appendLine(`  C_Cpp.files.exclude: 已清理旧规则，添加了 ${excludePaths.length} 条新规则`);
+        outputChannel.appendLine(`  search.exclude: 已清理旧规则，添加了 ${excludePaths.length} 条新规则`);
+        outputChannel.appendLine(`  C_Cpp.default.systemIncludePath: 添加了 ${includePaths.length} 个路径`);
+    }
 }

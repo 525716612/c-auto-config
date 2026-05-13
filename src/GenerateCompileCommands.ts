@@ -118,9 +118,11 @@ export async function handleGenerateAction() {
 
 				const needCopy = cygwinMakeDir !== cygwinRoot;
 				const commands = [
+					`rm -rf "${path.join(rootPath, 'compile_commands.json')}"`,
 					`cd "${cygwinMakeDir}"`,
 					`make clean`,
 					`make -n > build.log`,
+					`rm -f "${path.join(cygwinMakeDir, 'compile_commands.json')}"`,
 					`compiledb --parse build.log`,
 					`rm -f build.log`
 				];

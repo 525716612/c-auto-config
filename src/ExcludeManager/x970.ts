@@ -81,7 +81,7 @@ export async function handle970X(rootPath: string, outputChannel?: vscode.Output
     if (excludePaths.length > 0) {
         await Promise.all([
             updateClangdExclude(rootPath, excludePaths, outputChannel),
-            updateSettingsExclude(rootPath, excludePaths, outputChannel)
+            updateSettingsExclude(rootPath, excludePaths, 'X970', outputChannel)
         ]);
         if (outputChannel) {outputChannel.appendLine(`✅ 已为 ${excludePaths.length} 个未活动的文件夹禁用 clangd 和 C/C++ 插件的索引/搜索`);}
     } else {

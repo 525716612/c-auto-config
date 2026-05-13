@@ -106,7 +106,7 @@ export async function handleMST9U7(rootPath: string, outputChannel?: vscode.Outp
     if (excludePaths.length > 0) {
         await Promise.all([
             updateClangdExclude(rootPath, excludePaths, outputChannel),
-            updateSettingsExclude(rootPath, excludePaths, outputChannel)
+            updateSettingsExclude(rootPath, excludePaths, 'MST9U7', outputChannel)
         ]);
         if (outputChannel) {outputChannel.appendLine(`✅ 已为 ${excludePaths.length} 个未活动的文件夹禁用 clangd 和 C/C++ 插件的索引/搜索`);}
     } else {
