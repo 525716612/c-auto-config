@@ -3,7 +3,7 @@
   "displayName": "c auto config",
   "description": "jrymonitorconfig",
   "publisher": "cxy",
-  "version": "0.0.3",
+  "version": "0.0.8",
   "engines": {
     "vscode": "^1.118.0"
   },
@@ -44,10 +44,15 @@
     "configuration": {
       "title": "C工程配置工具",
       "properties": {
-        "cAutoConfig.cygwinPath": {
+        "cAutoConfig.cygwinRoot": {
           "type": "string",
-          "default": "D:\\cygwin\\bin\\bash.exe",
-          "description": "Cygwin 的 bash.exe 完整路径"
+          "default": "D:\\cygwin",
+          "description": "Cygwin 安装根目录，插件会自动拼接 bin/bash.exe 和 opt/aeon/bin/aeon-gcc.exe"
+        },
+        "cAutoConfig.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "编译器完整路径（如 D:\\cygwin\\opt\\aeon\\bin\\aeon-gcc.exe）。留空时自动从 cygwinRoot 拼接 opt/aeon/bin/aeon-gcc.exe"
         },
         "cAutoConfig.clangdTemplate": {
           "type": "object",
