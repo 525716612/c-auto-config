@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as yaml from "js-yaml";
+import { spawn } from "child_process";
 
 // ---------- 辅助函数 ----------
 export function findRelativeFolder(
@@ -89,20 +90,17 @@ export function getSourceRelativePaths(
 	}
 }
 
-// 新增：根据 Cygwin bash 路径推导三个头文件目录（Windows 绝对路径，正斜杠）
-export function getCygwinIncludePaths(cygwinBashPath: string): string[] {
-	if (!cygwinBashPath) {return [];}
-	const normalized = path.normalize(cygwinBashPath);
-	// 提取 Cygwin 根目录: e.g., D:\cygwin\bin\bash.exe -> D:\cygwin
-	const binDir = path.dirname(normalized);
-	const cygwinRoot = path.dirname(binDir);
-	if (!fs.existsSync(cygwinRoot)) {return [];}
+// 根据 Cygwin 根目录推导三个头文件目录（Windows 绝对路径，正斜杠）
+export function getCygwinIncludePaths(cygwinRoot: string): string[] {
+	if (!cygwinRoot) {return [];}
+	const normalized = path.normalize(cygwinRoot);
+	if (!fs.existsSync(normalized)) {return [];}
 
 	const possiblePaths = [
-		path.join(cygwinRoot, "opt", "aeon", "include"),
-		path.join(cygwinRoot, "usr", "include"),
+		path.join(normalized, "opt", "aeon", "include"),
+		path.join(normalized, "usr", "include"),
 		path.join(
-			cygwinRoot,
+			normalized,
 			"opt",
 			"aeon",
 			"lib",
@@ -115,6 +113,101 @@ export function getCygwinIncludePaths(cygwinBashPath: string): string[] {
 	return possiblePaths
 		.map((p) => p.replace(/\\/g, "/"))
 		.filter((p) => fs.existsSync(p));
+}
+
+/** 从 cygwinRoot 获取 bash.exe 的完整路径 */
+export function getBashPath(cygwinRoot: string): string {
+	if (!cygwinRoot) {return "";}
+	return path.join(cygwinRoot, "bin", "bash.exe");
+}
+
+/** 获取编译器路径：优先使用 compilerPath 配置，否则从 cygwinRoot 自动拼接 */
+export function getCompilerPath(cygwinRoot: string): string {
+	if (!cygwinRoot) {return "";}
+	const configPath = vscode.workspace.getConfiguration("cAutoConfig").get<string>("compilerPath");
+	if (configPath) {return configPath;}
+	return path.join(cygwinRoot, "opt", "aeon", "bin", "aeon-gcc.exe");
+}
+
+/** 运行编译器获取内置宏定义，返回宏名字数组（格式同 compile_commands.json 中的 -D 值） */
+export async function getCompilerBuiltinDefines(
+	cygwinRoot: string,
+	outputChannel?: vscode.OutputChannel,
+): Promise<string[]> {
+	const bashPath = getBashPath(cygwinRoot);
+	const compilerPath = getCompilerPath(cygwinRoot);
+	if (!fs.existsSync(bashPath) || !fs.existsSync(compilerPath)) {
+		if (outputChannel) {
+			outputChannel.appendLine(
+				`[警告] 编译器或 bash 不存在: ${compilerPath}`,
+			);
+		}
+		return [];
+	}
+
+	return new Promise<string[]>((resolve) => {
+		const cmd = `"${compilerPath.replace(/\\/g, "/")}" -march=aeonR2 -mhard-div -mhard-mul -mredzone-size=4 -O2 -std=c99 -Wp,-v -E -dM -x c /dev/null`;
+		if (outputChannel) {
+			outputChannel.appendLine(`[调试] 执行编译器获取内置宏: ${cmd}`);
+		}
+		const child = spawn(bashPath, ["-l", "-c", cmd], {
+			windowsHide: true,
+		});
+
+		let stdout = "";
+		child.stdout.on("data", (data: Buffer) => {
+			stdout += data.toString();
+		});
+
+		let stderr = "";
+		child.stderr.on("data", (data: Buffer) => {
+			stderr += data.toString();
+		});
+
+		child.on("close", (code) => {
+			if (code !== 0) {
+				if (outputChannel) {
+					outputChannel.appendLine(
+						`[警告] 编译器进程退出码 ${code}, stderr: ${stderr.trim()}`,
+					);
+				}
+				resolve([]);
+				return;
+			}
+			// 解析 #define MACRO 或 #define MACRO value
+			const defines: string[] = [];
+			const lines = stdout.split("\n");
+			for (const line of lines) {
+				const match = line.match(/^#define\s+([A-Za-z_][A-Za-z0-9_]*(?:\s+.*)?)$/);
+				if (match) {
+					let define = match[1].trim();
+					// 将 "MACRO value" 转为 "MACRO=value"（VS Code 格式）
+					const firstSpace = define.indexOf(" ");
+					if (firstSpace > 0) {
+						const name = define.substring(0, firstSpace);
+						const value = define.substring(firstSpace + 1).trim();
+						define = `${name}=${value}`;
+					}
+					defines.push(define);
+				}
+			}
+			if (outputChannel) {
+				outputChannel.appendLine(
+					`[调试] 编译器内置宏: 共提取 ${defines.length} 个`,
+				);
+			}
+			resolve(defines);
+		});
+
+		child.on("error", (err) => {
+			if (outputChannel) {
+				outputChannel.appendLine(
+					`[警告] 启动编译器失败: ${err.message}`,
+				);
+			}
+			resolve([]);
+		});
+	});
 }
 
 // 更新 .clangd 文件（合并 -I 路径到 CompileFlags.Add）
@@ -155,13 +248,13 @@ export async function updateClangdExclude(
 	baseYaml = fixedLines.join("\n");
 
 	// 准备要插入的 -I 标志字符串（不包含末尾多余换行）
-	const cygwinBashPath = vscode.workspace
+	const cygwinRoot = vscode.workspace
 		.getConfiguration("cAutoConfig")
-		.get<string>("cygwinPath");
+		.get<string>("cygwinRoot");
 	let extraIFlags = "";
 	let addedCount = 0;
-	if (cygwinBashPath) {
-		const includePaths = getCygwinIncludePaths(cygwinBashPath);
+	if (cygwinRoot) {
+		const includePaths = getCygwinIncludePaths(cygwinRoot);
 		if (includePaths.length > 0 && outputChannel) {
 			outputChannel.appendLine(
 				`[调试] 检测到 Cygwin 头文件路径: ${includePaths.join(", ")}`,
@@ -194,7 +287,7 @@ export async function updateClangdExclude(
 	} else {
 		if (outputChannel)
 			{outputChannel.appendLine(
-				"[调试] 未配置 cygwinPath 或路径无效，不添加 -I 标志",
+				"[调试] 未配置 cygwinRoot 或路径无效，不添加 -I 标志",
 			);}
 	}
 
@@ -264,57 +357,252 @@ export async function updateSettingsExclude(
         }
     }
 
-    // 辅助函数：删除以 managedBasePaths 中任意路径开头的排除键（且以 /** 结尾）
-    function clearManagedExcludes(excludeObj: any) {
-        for (const key of Object.keys(excludeObj)) {
-            const normalizedKey = key.replace(/\\/g, '/');
-            for (const base of managedBasePaths) {
-                if (normalizedKey.startsWith(base) && normalizedKey.endsWith('/**')) {
-                    delete excludeObj[key];
-                    break;
-                }
-            }
-        }
+    // ---- 自动生成条目管理（独立文件，不污染 settings.json）----
+    const managedFilePath = path.join(vscodeDir, 'cAutoConfig.managed.json');
+    let managed: Record<string, string[]> = {};
+    if (fs.existsSync(managedFilePath)) {
+        try {
+            managed = JSON.parse(fs.readFileSync(managedFilePath, 'utf-8'));
+        } catch (_) { /* 忽略 */ }
+    }
+
+    // 辅助：从数组类型设置中移除被管理的旧值
+    function removeManagedArray(targetKey: string) {
+        const oldManaged: string[] = managed[targetKey] || [];
+        if (oldManaged.length === 0) {return;}
+        const arr: string[] = settings[targetKey] || [];
+        settings[targetKey] = arr.filter((v: string) => !oldManaged.includes(v));
+    }
+    // 辅助：从对象类型设置中移除被管理的旧 key
+    function removeManagedObject(targetKey: string) {
+        const oldManaged: string[] = managed[targetKey] || [];
+        if (oldManaged.length === 0) {return;}
+        const obj: any = settings[targetKey] || {};
+        for (const k of oldManaged) {delete obj[k];}
+        settings[targetKey] = obj;
+    }
+
+    // 写 managed 到独立文件
+    function saveManaged() {
+        fs.writeFileSync(managedFilePath, JSON.stringify(managed, null, 2), 'utf-8');
     }
 
     // 2. 清理并更新 C_Cpp.files.exclude
+    removeManagedObject('C_Cpp.files.exclude');
     if (!settings['C_Cpp.files.exclude']) {settings['C_Cpp.files.exclude'] = {};}
     const cppFilesExclude = settings['C_Cpp.files.exclude'];
-    clearManagedExcludes(cppFilesExclude);
+    const newCppExcludeKeys: string[] = [];
     for (const p of excludePaths) {
         const normalized = p.replace(/\\/g, '/');
-        cppFilesExclude[`${normalized}/**`] = true;
+        const key = `${normalized}/**`;
+        cppFilesExclude[key] = true;
+        newCppExcludeKeys.push(key);
     }
     settings['C_Cpp.files.exclude'] = cppFilesExclude;
+    managed['C_Cpp.files.exclude'] = newCppExcludeKeys;
+    saveManaged();
 
     // 3. 清理并更新 search.exclude
+    removeManagedObject('search.exclude');
     if (!settings['search.exclude']) {settings['search.exclude'] = {};}
     const searchExclude = settings['search.exclude'];
-    clearManagedExcludes(searchExclude);
+    const newSearchExcludeKeys: string[] = [];
     for (const p of excludePaths) {
         const normalized = p.replace(/\\/g, '/');
-        searchExclude[`${normalized}/**`] = true;
+        const key = `${normalized}/**`;
+        searchExclude[key] = true;
+        newSearchExcludeKeys.push(key);
     }
     settings['search.exclude'] = searchExclude;
+    managed['search.exclude'] = newSearchExcludeKeys;
+    saveManaged();
 
-    // 4. C_Cpp.default.systemIncludePath（保持累加逻辑不变）
+    // 4. C_Cpp.default.systemIncludePath（先清除旧自动条目，再累加新条目）
+    removeManagedArray('C_Cpp.default.systemIncludePath');
     if (!settings['C_Cpp.default.systemIncludePath']) {settings['C_Cpp.default.systemIncludePath'] = [];}
     const currentSystemInclude = settings['C_Cpp.default.systemIncludePath'];
-    const cygwinBashPath = vscode.workspace.getConfiguration('cAutoConfig').get<string>('cygwinPath');
+    const cygwinRoot = vscode.workspace.getConfiguration('cAutoConfig').get<string>('cygwinRoot');
+    const newSystemIncludeManaged: string[] = [];
     let includePaths: string[] = [];
-    if (cygwinBashPath) {
-        includePaths = getCygwinIncludePaths(cygwinBashPath);
+    if (cygwinRoot) {
+        includePaths = getCygwinIncludePaths(cygwinRoot);
         if (includePaths.length > 0 && outputChannel) {
             outputChannel.appendLine(`[调试] 设置 C_Cpp.default.systemIncludePath: ${includePaths.join(', ')}`);
         }
     }
-    const newSystemInclude = [...currentSystemInclude];
     for (const incPath of includePaths) {
-        if (!newSystemInclude.includes(incPath)) {
-            newSystemInclude.push(incPath);
+        if (!currentSystemInclude.includes(incPath)) {
+            currentSystemInclude.push(incPath);
+        }
+        if (!newSystemIncludeManaged.includes(incPath)) {
+            newSystemIncludeManaged.push(incPath);
         }
     }
-    settings['C_Cpp.default.systemIncludePath'] = newSystemInclude;
+    // 从 compile_commands.json 提取 -I 头文件路径
+    const compileDbPath = path.join(rootPath, 'compile_commands.json');
+    const extractedIncludeSet = new Set<string>();
+    if (fs.existsSync(compileDbPath)) {
+        try {
+            const content = fs.readFileSync(compileDbPath, 'utf-8');
+            const entries: any[] = JSON.parse(content);
+            for (const entry of entries) {
+                const tokens: string[] = [];
+                if (entry.arguments && Array.isArray(entry.arguments)) {
+                    tokens.push(...entry.arguments);
+                } else if (entry.command) {
+                    const parts = entry.command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+                    if (parts) {tokens.push(...parts);}
+                }
+                const entryDir = entry.directory
+                    ? (path.isAbsolute(entry.directory) ? entry.directory : path.resolve(rootPath, entry.directory))
+                    : rootPath;
+                for (const token of tokens) {
+                    const iMatch = token.match(/^-I\s*(.+)$/);
+                    if (iMatch) {
+                        let incPathEntry = iMatch[1].trim();
+                        if ((incPathEntry.startsWith('"') && incPathEntry.endsWith('"')) ||
+                            (incPathEntry.startsWith("'") && incPathEntry.endsWith("'"))) {
+                            incPathEntry = incPathEntry.slice(1, -1);
+                        }
+                        const resolved = path.isAbsolute(incPathEntry)
+                            ? incPathEntry
+                            : path.resolve(entryDir, incPathEntry);
+                        extractedIncludeSet.add(resolved.replace(/\\/g, '/'));
+                    }
+                }
+            }
+        } catch (err) {
+            if (outputChannel) {
+                outputChannel.appendLine(`[警告] 解析 compile_commands.json 提取 include 路径失败: ${err}`);
+            }
+        }
+    }
+    for (const incPathEntry of extractedIncludeSet) {
+        if (!currentSystemInclude.includes(incPathEntry)) {
+            currentSystemInclude.push(incPathEntry);
+        }
+        if (!newSystemIncludeManaged.includes(incPathEntry)) {
+            newSystemIncludeManaged.push(incPathEntry);
+        }
+    }
+    settings['C_Cpp.default.systemIncludePath'] = currentSystemInclude;
+    managed['C_Cpp.default.systemIncludePath'] = newSystemIncludeManaged;
+    saveManaged();
+    if (extractedIncludeSet.size > 0 && outputChannel) {
+        outputChannel.appendLine(`  C_Cpp.default.systemIncludePath: 从 compile_commands.json 提取了 ${extractedIncludeSet.size} 个头文件路径（去重后新增）`);
+    }
+
+    // 5. 从 compile_commands.json 提取 -D 宏定义（先清除旧自动条目）
+    removeManagedArray('C_Cpp.default.defines');
+    const extractedDefines = new Set<string>();
+    if (fs.existsSync(compileDbPath)) {
+        try {
+            const content = fs.readFileSync(compileDbPath, 'utf-8');
+            const entries: any[] = JSON.parse(content);
+            for (const entry of entries) {
+                const tokens: string[] = [];
+                if (entry.arguments && Array.isArray(entry.arguments)) {
+                    tokens.push(...entry.arguments);
+                } else if (entry.command) {
+                    const parts = entry.command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+                    if (parts) {tokens.push(...parts);}
+                }
+                for (const token of tokens) {
+                    const dMatch = token.match(/^-D\s*(.+)$/);
+                    if (dMatch) {
+                        let define = dMatch[1].trim();
+                        if ((define.startsWith('"') && define.endsWith('"')) ||
+                            (define.startsWith("'") && define.endsWith("'"))) {
+                            define = define.slice(1, -1);
+                        }
+                        extractedDefines.add(define);
+                    }
+                }
+            }
+        } catch (err) {
+            if (outputChannel) {
+                outputChannel.appendLine(`[警告] 解析 compile_commands.json 提取 defines 失败: ${err}`);
+            }
+        }
+    }
+    const definesManaged: string[] = [];
+    if (extractedDefines.size > 0) {
+        if (!settings['C_Cpp.default.defines']) {settings['C_Cpp.default.defines'] = [];}
+        const currentDefines = settings['C_Cpp.default.defines'] as string[];
+        for (const def of extractedDefines) {
+            if (!currentDefines.includes(def)) {
+                currentDefines.push(def);
+            }
+            definesManaged.push(def);
+        }
+        settings['C_Cpp.default.defines'] = currentDefines;
+        if (outputChannel) {
+            outputChannel.appendLine(`  C_Cpp.default.defines: 从 compile_commands.json 提取了 ${extractedDefines.size} 个宏定义（去重后新增）`);
+        }
+    } else {
+        if (outputChannel) {
+            outputChannel.appendLine(`  C_Cpp.default.defines: 未从 compile_commands.json 提取到宏定义`);
+        }
+    }
+
+    // 6. 从编译器中提取内置宏定义
+    if (cygwinRoot) {
+        const compilerDefines = await getCompilerBuiltinDefines(cygwinRoot, outputChannel);
+        if (compilerDefines.length > 0) {
+            if (!settings['C_Cpp.default.defines']) {settings['C_Cpp.default.defines'] = [];}
+            const currentDefines = settings['C_Cpp.default.defines'] as string[];
+            let addedCount = 0;
+            for (const def of compilerDefines) {
+                if (!currentDefines.includes(def)) {
+                    currentDefines.push(def);
+                    addedCount++;
+                }
+                if (!definesManaged.includes(def)) {
+                    definesManaged.push(def);
+                }
+            }
+            settings['C_Cpp.default.defines'] = currentDefines;
+            if (outputChannel) {
+                outputChannel.appendLine(`  C_Cpp.default.defines: 从编译器提取了 ${addedCount} 个内置宏定义（去重后新增）`);
+            }
+        } else {
+            if (outputChannel) {
+                outputChannel.appendLine(`  C_Cpp.default.defines: 未从编译器提取到内置宏定义`);
+            }
+        }
+    }
+
+    // 7. 追加固定的 GCC 兼容宏定义（帮助 IntelliSense 识别 GCC 特有关键字）
+    const gccCompatDefines = [
+        "__attribute__(x)=",
+        "__inline=",
+        "__inline__=",
+        "__extension__=",
+        "__restrict=",
+        "__restrict__=",
+        "__volatile__=",
+        "__const__=",
+        "__signed__=",
+    ];
+    if (!settings['C_Cpp.default.defines']) {settings['C_Cpp.default.defines'] = [];}
+    const currentDefinesFinal = settings['C_Cpp.default.defines'] as string[];
+    let gccAddedCount = 0;
+    for (const def of gccCompatDefines) {
+        if (!currentDefinesFinal.includes(def)) {
+            currentDefinesFinal.push(def);
+            gccAddedCount++;
+        }
+        if (!definesManaged.includes(def)) {
+            definesManaged.push(def);
+        }
+    }
+    settings['C_Cpp.default.defines'] = currentDefinesFinal;
+    if (outputChannel && gccAddedCount > 0) {
+        outputChannel.appendLine(`  C_Cpp.default.defines: 追加了 ${gccAddedCount} 个 GCC 兼容宏定义`);
+    }
+
+    managed['C_Cpp.default.defines'] = definesManaged;
+    saveManaged();
 
     // 写回 settings.json
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 4), 'utf-8');

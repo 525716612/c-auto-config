@@ -105,7 +105,8 @@ export async function handleGenerateAction() {
             },
             async () => {
                 const config = vscode.workspace.getConfiguration('cAutoConfig');
-                const cygwinBash = config.get<string>('cygwinPath') || 'D:\\Cygwin\\bin\\bash.exe';
+                const cygwinRootDir = config.get<string>('cygwinRoot') || 'D:\\cygwin';
+                const cygwinBash = path.join(cygwinRootDir, 'bin', 'bash.exe');
 
                 const relativeMakefile = findRelativeMakefilePath(rootPath);
                 if (!relativeMakefile) {
