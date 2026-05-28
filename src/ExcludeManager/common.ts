@@ -574,24 +574,8 @@ export async function updateSettingsExclude(
 
     // 7. 追加固定的 GCC 兼容宏定义（帮助 IntelliSense 识别 GCC 特有关键字）
     const gccCompatDefines = [
+        // 通用模板：__attribute__(x) 展开为 x，再与具体属性名宏配合清空
         "__attribute__(x)=",
-        "__attribute__(weak)=",
-        "__attribute__(packed)=",
-        "__attribute__(aligned(x))=",
-        "__attribute__(section(x))=",
-        "__attribute__(unused)=",
-        "__attribute__(used)=",
-        "__attribute__(deprecated)=",
-        "__attribute__(noreturn)=",
-        "__attribute__(always_inline)=",
-        "__attribute__(noinline)=",
-        "__attribute__(warn_unused_result)=",
-        "__attribute__(format(x))=",
-        "__attribute__(nonnull)=",
-        "__attribute__(constructor)=",
-        "__attribute__(destructor)=",
-        "__attribute__(weakref)=",
-        "__attribute__(visibility(x))=",
         "__inline=",
         "__inline__=",
         "__extension__=",
@@ -600,14 +584,25 @@ export async function updateSettingsExclude(
         "__volatile__=",
         "__const__=",
         "__signed__=",
+        // 无参数属性
         "weak=",
         "packed=",
-        "aligned=",
         "unused=",
         "used=",
+        "deprecated=",
         "noreturn=",
         "always_inline=",
         "noinline=",
+        "warn_unused_result=",
+        "nonnull=",
+        "constructor=",
+        "destructor=",
+        "weakref=",
+        // 带参数属性
+        "aligned(x)=",
+        "section(x)=",
+        "format(x)=",
+        "visibility(x)=",
     ];
     if (!settings['C_Cpp.default.defines']) {settings['C_Cpp.default.defines'] = [];}
     const currentDefinesFinal = settings['C_Cpp.default.defines'] as string[];

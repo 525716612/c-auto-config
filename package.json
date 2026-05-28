@@ -3,7 +3,7 @@
   "displayName": "c auto config",
   "description": "jrymonitorconfig",
   "publisher": "cxy",
-  "version": "0.0.9",
+  "version": "1.1.0",
   "engines": {
     "vscode": "^1.118.0"
   },
