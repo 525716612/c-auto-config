@@ -584,25 +584,6 @@ export async function updateSettingsExclude(
         "__volatile__=",
         "__const__=",
         "__signed__=",
-        // 无参数属性
-        "weak=",
-        "packed=",
-        "unused=",
-        "used=",
-        "deprecated=",
-        "noreturn=",
-        "always_inline=",
-        "noinline=",
-        "warn_unused_result=",
-        "nonnull=",
-        "constructor=",
-        "destructor=",
-        "weakref=",
-        // 带参数属性
-        "aligned(x)=",
-        "section(x)=",
-        "format(x)=",
-        "visibility(x)=",
 		"PRINTF_CHAR_MAX=256",
     ];
     // 读取用户自定义的额外宏定义
