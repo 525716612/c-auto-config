@@ -603,6 +603,7 @@ export async function updateSettingsExclude(
         "section(x)=",
         "format(x)=",
         "visibility(x)=",
+		"PRINTF_CHAR_MAX=256",
     ];
     if (!settings['C_Cpp.default.defines']) {settings['C_Cpp.default.defines'] = [];}
     const currentDefinesFinal = settings['C_Cpp.default.defines'] as string[];
