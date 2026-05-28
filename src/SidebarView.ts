@@ -61,17 +61,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
             pythonOk = true;
         } catch { /* 未安装 */ }
 
-        // 检查 compiledb（通过 pip show 或直接运行命令）
+        // 检查 compiledb
         let compiledbOk = false;
         if (pythonOk) {
             try {
                 execSync('compiledb --version', { stdio: 'pipe', windowsHide: true });
                 compiledbOk = true;
             } catch {
-                // 备用：通过 pip 检查
+                // 备用：通过 pip 检查（注意 pip show 在未安装时输出 WARNING 也包含包名，不能仅用 includes 判断）
                 try {
                     const pipOut = execSync('pip show compiledb', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' });
-                    compiledbOk = pipOut.includes('compiledb');
+                    // 判断依据：pip show 成功时输出以 "Name:" 开头；未安装时输出 "WARNING: Package(s) not found"
+                    compiledbOk = pipOut.startsWith('Name:');
                 } catch { /* 未安装 */ }
             }
         }
