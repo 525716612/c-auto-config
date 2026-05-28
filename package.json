@@ -3,7 +3,7 @@
   "displayName": "c auto config",
   "description": "jrymonitorconfig",
   "publisher": "cxy",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "engines": {
     "vscode": "^1.118.0"
   },
@@ -91,6 +91,14 @@
           },
           "markdownDescription": "clangd 配置文件的基础内容（将转换为 YAML 格式）。插件会自动添加 `If: PathExclude:` 块来排除非活动的 UI 文件夹。",
           "scope": "resource"
+        },
+        "cAutoConfig.extraDefines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "用户自定义的额外宏定义，会追加到 `C_Cpp.default.defines` 中。格式示例：`MY_MACRO=1` 或 `MY_FLAG`。插件内置的 GCC 兼容宏（`__attribute__`、`weak`、`packed` 等）不受此配置影响。"
         }
       }
     }

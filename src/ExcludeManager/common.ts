@@ -572,7 +572,7 @@ export async function updateSettingsExclude(
         }
     }
 
-    // 7. 追加固定的 GCC 兼容宏定义（帮助 IntelliSense 识别 GCC 特有关键字）
+    // 7. 追加固定的 GCC 兼容宏定义 + 用户自定义额外宏（帮助 IntelliSense 识别 GCC 特有关键字）
     const gccCompatDefines = [
         // 通用模板：__attribute__(x) 展开为 x，再与具体属性名宏配合清空
         "__attribute__(x)=",
@@ -605,10 +605,13 @@ export async function updateSettingsExclude(
         "visibility(x)=",
 		"PRINTF_CHAR_MAX=256",
     ];
+    // 读取用户自定义的额外宏定义
+    const extraDefines = vscode.workspace.getConfiguration('cAutoConfig').get<string[]>('extraDefines') || [];
+    const allCompatDefines = [...gccCompatDefines, ...extraDefines];
     if (!settings['C_Cpp.default.defines']) {settings['C_Cpp.default.defines'] = [];}
     const currentDefinesFinal = settings['C_Cpp.default.defines'] as string[];
     let gccAddedCount = 0;
-    for (const def of gccCompatDefines) {
+    for (const def of allCompatDefines) {
         if (!currentDefinesFinal.includes(def)) {
             currentDefinesFinal.push(def);
             gccAddedCount++;
