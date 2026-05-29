@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync } from 'child_process';
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'c-auto-config.webview';
@@ -54,71 +53,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     private _disposable?: vscode.Disposable;
 
     private _sendStatus(webviewView: vscode.WebviewView) {
-        // ---- 1. 检测 Python，获取绝对路径（尝试多个候选命令）----
-        let pythonOk = false;
-        let pythonExePath = '';
-        const pythonCandidates = ['python', 'py -3', 'python3', 'py'];
-        for (const cmd of pythonCandidates) {
-            try {
-                const out = execSync(
-                    `${cmd} -c "import sys; print(sys.executable)"`,
-                    { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 5000 },
-                );
-                const p = out.trim();
-                if (p && fs.existsSync(p)) {
-                    pythonExePath = p;
-                    pythonOk = true;
-                    break;
-                }
-            } catch { /* 尝试下一个 */ }
-        }
-        // 最后尝试用 where 命令查找
-        if (!pythonOk) {
-            try {
-                const whereOut = execSync('where python', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 5000 });
-                const lines = whereOut.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-                for (const line of lines) {
-                    if (fs.existsSync(line)) {
-                        pythonExePath = line;
-                        pythonOk = true;
-                        break;
-                    }
-                }
-            } catch { /* 忽略 */ }
-        }
-
-        // ---- 2. 用 Python 检测 compiledb，获取绝对路径 ----
-        let compiledbOk = false;
-        let compiledbPath = '';
-        if (pythonOk) {
-            try {
-                // 先用 shutil.which 搜索 PATH
-                const out = execSync(
-                    `"${pythonExePath}" -c "import shutil; p = shutil.which('compiledb'); print(p if p else '')"`,
-                    { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
-                );
-                const candidate = out.trim();
-                if (candidate && fs.existsSync(candidate)) {
-                    compiledbPath = candidate;
-                    compiledbOk = true;
-                }
-            } catch {
-                // 继续尝试直接运行
-            }
-        }
-        // 最终确认：直接运行 compiledb --help
-        if (!compiledbOk) {
-            try {
-                execSync('compiledb --help', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 10000 });
-                // 没抛异常说明可以运行，标记为已安装（路径未知但可用）
-                compiledbOk = true;
-                compiledbPath = '(通过 PATH 可用)';
-            } catch {
-                // compiledb 确实不可用
-            }
-        }
-
-        // ---- 3. 检查 cygwinRoot ----
+        // 检查 cygwinRoot
         const cygwinRoot = vscode.workspace.getConfiguration('cAutoConfig').get<string>('cygwinRoot');
         const cygwinOk = !!cygwinRoot && fs.existsSync(cygwinRoot);
 
@@ -150,10 +85,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.postMessage({
             type: 'status',
-            pythonOk,
-            pythonExePath,
-            compiledbOk,
-            compiledbPath,
             cygwinOk,
             cygwinRoot: cygwinRoot || '',
             compilerOk,
@@ -359,11 +290,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
             <div class="status-card">
                 <h4>环境检查</h4>
                 <div class="status-item">
-                    <span class="status-dot" id="dotPython"></span>
-                    <span class="status-label">Python</span>
-                    <span class="status-detail" id="detailPython">检查中...</span>
-                </div>
-                <div class="status-item">
                     <span class="status-dot" id="dotCygwin"></span>
                     <span class="status-label">Cygwin 根目录</span>
                     <span class="status-detail" id="detailCygwin">检查中...</span>
@@ -372,11 +298,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                     <span class="status-dot" id="dotCompiler"></span>
                     <span class="status-label">编译器 (aeon-gcc)</span>
                     <span class="status-detail" id="detailCompiler">检查中...</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-dot" id="dotCompiledb"></span>
-                    <span class="status-label">compiledb</span>
-                    <span class="status-detail" id="detailCompiledb">检查中...</span>
                 </div>
             </div>
 
@@ -398,23 +319,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
             </div>
 
             <!-- 操作指引（按检测项分别提示） -->
-            <div id="tipHelpPython" class="tip-box hidden" style="border-color:color-mix(in srgb, var(--error) 30%, transparent);background:color-mix(in srgb, var(--error) 12%, transparent);">
-                <strong style="color:var(--error)">&#9888; Python 未安装</strong>
-                <p style="margin:4px 0">compiledb 需要 Python 环境，请安装 Python 并确保 <code>python</code> 命令可用。</p>
-                <p style="margin:4px 0">
-                    <a href="https://www.python.org/downloads/" target="_blank">&#10132; 前往 python.org 下载</a>
-                </p>
-            </div>
-
-            <div id="tipHelpCompiledb" class="tip-box hidden" style="border-color:color-mix(in srgb, var(--error) 30%, transparent);background:color-mix(in srgb, var(--error) 12%, transparent);">
-                <strong style="color:var(--error)">&#9888; compiledb 未安装</strong>
-                <p style="margin:4px 0">compiledb 用于从构建日志生成 <code>compile_commands.json</code>。</p>
-                <p style="margin:4px 0">
-                    请在终端中运行：<br>
-                    <code style="display:inline-block;margin-top:2px">pip install compiledb</code>
-                </p>
-            </div>
-
             <div id="tipHelpCygwin" class="tip-box hidden" style="border-color:color-mix(in srgb, var(--error) 30%, transparent);background:color-mix(in srgb, var(--error) 12%, transparent);">
                 <strong style="color:var(--error)">&#9888; Cygwin 根目录未配置</strong>
                 <p style="margin:4px 0">请在 VS Code 设置中配置 <code>cAutoConfig.cygwinRoot</code>，插件会自动拼接编译器路径。</p>
@@ -454,10 +358,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                 });
 
                 document.getElementById('refreshBtn').addEventListener('click', () => {
-                    document.getElementById('detailPython').textContent = '检测中...';
                     document.getElementById('detailCygwin').textContent = '检测中...';
                     document.getElementById('detailCompiler').textContent = '检测中...';
-                    document.getElementById('detailCompiledb').textContent = '检测中...';
                     vscode.postMessage({ type: 'checkStatus' });
                 });
 
@@ -478,12 +380,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                     const msg = event.data;
                     if (msg.type !== 'status') return;
 
-                    // Python
-                    const dotPy = document.getElementById('dotPython');
-                    const detailPy = document.getElementById('detailPython');
-                    dotPy.className = 'status-dot ' + (msg.pythonOk ? 'ok' : 'err');
-                    detailPy.textContent = msg.pythonOk ? (msg.pythonExePath || '已安装') : '未安装';
-
                     // Cygwin
                     const dotCyg = document.getElementById('dotCygwin');
                     const detailCyg = document.getElementById('detailCygwin');
@@ -496,16 +392,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                     dotComp.className = 'status-dot ' + (msg.compilerOk ? 'ok' : (msg.cygwinOk ? 'warn' : 'err'));
                     detailComp.textContent = msg.compilerOk ? '可用' : (msg.cygwinOk ? '未找到' : '依赖 Cygwin');
 
-                    // compiledb
-                    const dotCdb = document.getElementById('dotCompiledb');
-                    const detailCdb = document.getElementById('detailCompiledb');
-                    dotCdb.className = 'status-dot ' + (msg.compiledbOk ? 'ok' : (msg.cygwinOk ? 'warn' : 'err'));
-                    if (msg.compiledbOk) {
-                        detailCdb.textContent = msg.compiledbPath || '已安装';
-                    } else {
-                        detailCdb.textContent = msg.cygwinOk ? '未安装 (pip install compiledb)' : '依赖 Cygwin';
-                    }
-
                     // compile_commands.json 配置警告
                     const tipCC = document.getElementById('tipCompileCommands');
                     const pathSpan = document.getElementById('compileCommandsPath');
@@ -517,13 +403,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                     }
 
                     // 按检测项分别显示操作指引
-                    document.getElementById('tipHelpPython').classList.toggle('hidden', msg.pythonOk);
-                    document.getElementById('tipHelpCompiledb').classList.toggle('hidden', msg.compiledbOk);
                     document.getElementById('tipHelpCygwin').classList.toggle('hidden', msg.cygwinOk);
                     document.getElementById('tipHelpCompiler').classList.toggle('hidden', msg.compilerOk);
 
                     // 一切就绪提示
-                    const allOk = msg.pythonOk && msg.cygwinOk && msg.compilerOk && msg.compiledbOk;
+                    const allOk = msg.cygwinOk && msg.compilerOk;
                     document.getElementById('tipReady').classList.toggle('hidden', !allOk);
                     document.getElementById('genBtn').disabled = !allOk;
                 });
