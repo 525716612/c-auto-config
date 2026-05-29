@@ -54,36 +54,67 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     private _disposable?: vscode.Disposable;
 
     private _sendStatus(webviewView: vscode.WebviewView) {
-        // ---- 1. 检测 Python，获取绝对路径 ----
+        // ---- 1. 检测 Python，获取绝对路径（尝试多个候选命令）----
         let pythonOk = false;
         let pythonExePath = '';
-        try {
-            const out = execSync(
-                'python -c "import sys; print(sys.executable)"',
-                { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
-            );
-            pythonExePath = out.trim();
-            pythonOk = !!pythonExePath && fs.existsSync(pythonExePath);
-        } catch { /* Python 未安装 */ }
+        const pythonCandidates = ['python', 'py -3', 'python3', 'py'];
+        for (const cmd of pythonCandidates) {
+            try {
+                const out = execSync(
+                    `${cmd} -c "import sys; print(sys.executable)"`,
+                    { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 5000 },
+                );
+                const p = out.trim();
+                if (p && fs.existsSync(p)) {
+                    pythonExePath = p;
+                    pythonOk = true;
+                    break;
+                }
+            } catch { /* 尝试下一个 */ }
+        }
+        // 最后尝试用 where 命令查找
+        if (!pythonOk) {
+            try {
+                const whereOut = execSync('where python', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 5000 });
+                const lines = whereOut.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                for (const line of lines) {
+                    if (fs.existsSync(line)) {
+                        pythonExePath = line;
+                        pythonOk = true;
+                        break;
+                    }
+                }
+            } catch { /* 忽略 */ }
+        }
 
         // ---- 2. 用 Python 检测 compiledb，获取绝对路径 ----
         let compiledbOk = false;
         let compiledbPath = '';
         if (pythonOk) {
             try {
-                // 通过 Python 找到 compiledb 的 Scripts 目录
+                // 先用 shutil.which 搜索 PATH
                 const out = execSync(
-                    `"${pythonExePath}" -c "import compiledb; import sysconfig; print(sysconfig.get_path('scripts'), end='')"`,
+                    `"${pythonExePath}" -c "import shutil; p = shutil.which('compiledb'); print(p if p else '')"`,
                     { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
                 );
-                const scriptsDir = out.trim();
-                const candidate = path.join(scriptsDir, 'compiledb.exe');
-                if (fs.existsSync(candidate)) {
+                const candidate = out.trim();
+                if (candidate && fs.existsSync(candidate)) {
                     compiledbPath = candidate;
                     compiledbOk = true;
                 }
             } catch {
-                // compiledb 模块未安装
+                // 继续尝试直接运行
+            }
+        }
+        // 最终确认：直接运行 compiledb --help
+        if (!compiledbOk) {
+            try {
+                execSync('compiledb --help', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 10000 });
+                // 没抛异常说明可以运行，标记为已安装（路径未知但可用）
+                compiledbOk = true;
+                compiledbPath = '(通过 PATH 可用)';
+            } catch {
+                // compiledb 确实不可用
             }
         }
 

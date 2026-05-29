@@ -51,31 +51,66 @@ function toCygwinPath(winPath: string): string {
                   .replace(/\\/g, '/');
 }
 
-/** 检测 Python 绝对路径 */
+/** 检测 Python 绝对路径（支持多个候选命令，兼容不同系统环境） */
 function detectPythonExe(): string {
-    try {
-        const out = execSync(
-            'python -c "import sys; print(sys.executable)"',
-            { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
-        );
-        const p = String(out).trim();
-        return p && fs.existsSync(p) ? p : '';
-    } catch {
-        return '';
+    const candidates = ['python', 'py -3', 'python3', 'py'];
+    for (const cmd of candidates) {
+        try {
+            const out = execSync(
+                `${cmd} -c "import sys; print(sys.executable)"`,
+                { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 5000 },
+            );
+            const p = String(out).trim();
+            if (p && fs.existsSync(p)) {
+                outputChannel?.appendLine(`检测到 Python: ${cmd} -> ${p}`);
+                return p;
+            }
+        } catch {
+            // 尝试下一个候选命令
+            outputChannel?.appendLine(`尝试 ${cmd} 失败，换下一个...`);
+        }
     }
+    // 最后尝试用 where 命令查找 python
+    try {
+        const whereOut = execSync('where python', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 5000 });
+        const lines = whereOut.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+            if (fs.existsSync(line)) {
+                outputChannel?.appendLine(`通过 where 找到 Python: ${line}`);
+                return line;
+            }
+        }
+    } catch {
+        // 忽略
+    }
+    outputChannel?.appendLine('未检测到任何 Python 环境');
+    return '';
 }
 
-/** 用 Python 检测 compiledb 绝对路径 */
+/** 用 Python 检测 compiledb 绝对路径（通过 shutil.which 搜索 PATH + 最终确认运行） */
 function detectCompiledbPath(pythonExe: string): string {
     if (!pythonExe) {return '';}
+    // 1. 先用 shutil.which 查找
     try {
         const out = execSync(
-            `"${pythonExe}" -c "import compiledb; import sysconfig; print(sysconfig.get_path('scripts'), end='')"`,
+            `"${pythonExe}" -c "import shutil; p = shutil.which('compiledb'); print(p if p else '')"`,
             { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
         );
-        const candidate = path.join(String(out).trim(), 'compiledb.exe');
-        return fs.existsSync(candidate) ? candidate : '';
+        const candidate = String(out).trim();
+        if (candidate && fs.existsSync(candidate)) {
+            outputChannel?.appendLine(`通过 shutil.which 找到 compiledb: ${candidate}`);
+            return candidate;
+        }
     } catch {
+        // 继续
+    }
+    // 2. 最终确认：直接运行 compiledb --help，成功即说明在 PATH 中，直接用命令名
+    try {
+        execSync('compiledb --help', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 10000 });
+        outputChannel?.appendLine('compiledb 通过直接运行确认可用（使用命令名，Cygwin 继承 Windows PATH）');
+        return 'compiledb';
+    } catch {
+        outputChannel?.appendLine('compiledb 最终确认不可用');
         return '';
     }
 }
