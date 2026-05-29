@@ -3,7 +3,7 @@
   "displayName": "c auto config",
   "description": "jrymonitorconfig",
   "publisher": "cxy",
-  "version": "1.1.4",
+  "version": "1.1.6",
   "engines": {
     "vscode": "^1.118.0"
   },
@@ -99,6 +99,11 @@
           },
           "default": [],
           "markdownDescription": "用户自定义的额外宏定义，会追加到 `C_Cpp.default.defines` 中。格式示例：`MY_MACRO=1` 或 `MY_FLAG`。插件内置的 GCC 兼容宏（`__attribute__`、`weak`、`packed` 等）不受此配置影响。"
+        },
+        "cAutoConfig.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "启用调试日志输出。开启后会在输出通道中显示详细的 `[调试]` 级别日志（如逐文件路径转换信息），便于排查问题。"
         }
       }
     }

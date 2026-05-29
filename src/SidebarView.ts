@@ -54,30 +54,40 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     private _disposable?: vscode.Disposable;
 
     private _sendStatus(webviewView: vscode.WebviewView) {
-        // 检查 Python
+        // ---- 1. 检测 Python，获取绝对路径 ----
         let pythonOk = false;
+        let pythonExePath = '';
         try {
-            execSync('python --version', { stdio: 'pipe', windowsHide: true });
-            pythonOk = true;
-        } catch { /* 未安装 */ }
+            const out = execSync(
+                'python -c "import sys; print(sys.executable)"',
+                { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
+            );
+            pythonExePath = out.trim();
+            pythonOk = !!pythonExePath && fs.existsSync(pythonExePath);
+        } catch { /* Python 未安装 */ }
 
-        // 检查 compiledb
+        // ---- 2. 用 Python 检测 compiledb，获取绝对路径 ----
         let compiledbOk = false;
+        let compiledbPath = '';
         if (pythonOk) {
             try {
-                execSync('compiledb --version', { stdio: 'pipe', windowsHide: true });
-                compiledbOk = true;
+                // 通过 Python 找到 compiledb 的 Scripts 目录
+                const out = execSync(
+                    `"${pythonExePath}" -c "import compiledb; import sysconfig; print(sysconfig.get_path('scripts'), end='')"`,
+                    { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
+                );
+                const scriptsDir = out.trim();
+                const candidate = path.join(scriptsDir, 'compiledb.exe');
+                if (fs.existsSync(candidate)) {
+                    compiledbPath = candidate;
+                    compiledbOk = true;
+                }
             } catch {
-                // 备用：通过 pip 检查（注意 pip show 在未安装时输出 WARNING 也包含包名，不能仅用 includes 判断）
-                try {
-                    const pipOut = execSync('pip show compiledb', { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' });
-                    // 判断依据：pip show 成功时输出以 "Name:" 开头；未安装时输出 "WARNING: Package(s) not found"
-                    compiledbOk = pipOut.startsWith('Name:');
-                } catch { /* 未安装 */ }
+                // compiledb 模块未安装
             }
         }
 
-        // 检查 cygwinRoot
+        // ---- 3. 检查 cygwinRoot ----
         const cygwinRoot = vscode.workspace.getConfiguration('cAutoConfig').get<string>('cygwinRoot');
         const cygwinOk = !!cygwinRoot && fs.existsSync(cygwinRoot);
 
@@ -110,7 +120,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.postMessage({
             type: 'status',
             pythonOk,
+            pythonExePath,
             compiledbOk,
+            compiledbPath,
             cygwinOk,
             cygwinRoot: cygwinRoot || '',
             compilerOk,
@@ -439,7 +451,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                     const dotPy = document.getElementById('dotPython');
                     const detailPy = document.getElementById('detailPython');
                     dotPy.className = 'status-dot ' + (msg.pythonOk ? 'ok' : 'err');
-                    detailPy.textContent = msg.pythonOk ? '已安装' : '未安装';
+                    detailPy.textContent = msg.pythonOk ? (msg.pythonExePath || '已安装') : '未安装';
 
                     // Cygwin
                     const dotCyg = document.getElementById('dotCygwin');
@@ -456,8 +468,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
                     // compiledb
                     const dotCdb = document.getElementById('dotCompiledb');
                     const detailCdb = document.getElementById('detailCompiledb');
-                    dotCdb.className = 'status-dot ' + (msg.compiledbOk ? 'ok' : 'err');
-                    detailCdb.textContent = msg.compiledbOk ? '已安装' : (msg.pythonOk ? '未安装 (pip install compiledb)' : '依赖 Python');
+                    dotCdb.className = 'status-dot ' + (msg.compiledbOk ? 'ok' : (msg.cygwinOk ? 'warn' : 'err'));
+                    if (msg.compiledbOk) {
+                        detailCdb.textContent = msg.compiledbPath || '已安装';
+                    } else {
+                        detailCdb.textContent = msg.cygwinOk ? '未安装 (pip install compiledb)' : '依赖 Cygwin';
+                    }
 
                     // compile_commands.json 配置警告
                     const tipCC = document.getElementById('tipCompileCommands');

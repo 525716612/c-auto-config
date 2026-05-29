@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { syncExcludeFolders } from './ExcludeManager/index';
@@ -49,6 +49,35 @@ function findRelativeMakefilePath(rootDir: string): string | null {
 function toCygwinPath(winPath: string): string {
     return winPath.replace(/^([A-Za-z]):\\/, (_, drive) => `/cygdrive/${drive.toLowerCase()}/`)
                   .replace(/\\/g, '/');
+}
+
+/** 检测 Python 绝对路径 */
+function detectPythonExe(): string {
+    try {
+        const out = execSync(
+            'python -c "import sys; print(sys.executable)"',
+            { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
+        );
+        const p = String(out).trim();
+        return p && fs.existsSync(p) ? p : '';
+    } catch {
+        return '';
+    }
+}
+
+/** 用 Python 检测 compiledb 绝对路径 */
+function detectCompiledbPath(pythonExe: string): string {
+    if (!pythonExe) {return '';}
+    try {
+        const out = execSync(
+            `"${pythonExe}" -c "import compiledb; import sysconfig; print(sysconfig.get_path('scripts'), end='')"`,
+            { stdio: 'pipe', windowsHide: true, encoding: 'utf-8' },
+        );
+        const candidate = path.join(String(out).trim(), 'compiledb.exe');
+        return fs.existsSync(candidate) ? candidate : '';
+    } catch {
+        return '';
+    }
 }
 
 
@@ -117,6 +146,19 @@ export async function handleGenerateAction() {
                 const cygwinRoot = toCygwinPath(rootPath);
                 const cygwinMakeDir = toCygwinPath(path.join(rootPath, makefileDir));
 
+                // 检测 Python 和 compiledb 的绝对路径，防止 PATH 问题
+                const pythonExe = detectPythonExe();
+                if (!pythonExe) {
+                    throw new Error('未检测到 Python 环境，请安装 Python');
+                }
+                const cdbPath = detectCompiledbPath(pythonExe);
+                if (!cdbPath) {
+                    throw new Error('未检测到 compiledb，请运行: pip install compiledb');
+                }
+                // 转成 Cygwin 路径后在 bash 中使用
+                const compiledbCmd = toCygwinPath(cdbPath);
+                outputChannel.appendLine(`使用 compiledb: ${cdbPath}`);
+
 				const needCopy = cygwinMakeDir !== cygwinRoot;
 				const commands = [
 					`rm -rf "${path.join(rootPath, 'compile_commands.json')}"`,
@@ -124,7 +166,7 @@ export async function handleGenerateAction() {
 					`make clean`,
 					`make -n > build.log`,
 					`rm -f "${path.join(cygwinMakeDir, 'compile_commands.json')}"`,
-					`compiledb --parse build.log`,
+					`PYTHONUTF8=1 "${compiledbCmd}" --parse build.log`,
 					`rm -f build.log`
 				];
 				if (needCopy) {

@@ -3,13 +3,14 @@ import { handleMST9U7 } from './mst9u7';
 import { handleMST9U6 } from './mst9u6';
 import { handle970X } from './x970';
 import { detectProjectType } from '../ProjectDetector';
+import { debugLog } from './common';
 
 export async function syncExcludeFolders(
     rootPath: string,
     outputChannel?: vscode.OutputChannel
 ): Promise<void> {
     const projectType = detectProjectType(rootPath);
-    if (outputChannel) {outputChannel.appendLine(`[调试] 工程类型: ${projectType}`);}
+    debugLog(outputChannel, `工程类型: ${projectType}`);
 
     if (projectType === 'MST9U7') {
         await handleMST9U7(rootPath, outputChannel);

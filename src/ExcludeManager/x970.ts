@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { findRelativeFolder, getSourceRelativePaths, updateClangdExclude, updateSettingsExclude } from './common';
+import { findRelativeFolder, getSourceRelativePaths, updateSettingsExclude, updateClangdExclude, debugLog } from './common';
 
 export async function handle970X(rootPath: string, outputChannel?: vscode.OutputChannel): Promise<void> {
     const monitorApRel = findRelativeFolder(rootPath, 'monitor_ap', 3);
@@ -18,10 +18,10 @@ export async function handle970X(rootPath: string, outputChannel?: vscode.Output
     const allSubdirs = fs.readdirSync(customFull, { withFileTypes: true })
         .filter(d => d.isDirectory())
         .map(d => d.name);
-    if (outputChannel) {outputChannel.appendLine(`[调试] CUSTOM 下所有子文件夹: ${allSubdirs.join(', ')}`);}
+    debugLog(outputChannel, `CUSTOM 下所有子文件夹: ${allSubdirs.join(', ')}`);
     const uiSubdirs = allSubdirs.filter(name => name !== 'COMMON' && name !== 'Board_Model');
     if (uiSubdirs.length === 0) {
-        if (outputChannel) {outputChannel.appendLine('[调试] 没有 UI 子文件夹，无需排除');}
+        debugLog(outputChannel, '没有 UI 子文件夹，无需排除');
         return;
     }
     const compileDbPath = path.join(rootPath, 'compile_commands.json');
@@ -35,14 +35,14 @@ export async function handle970X(rootPath: string, outputChannel?: vscode.Output
             const sub = slashIdx === -1 ? afterCustom : afterCustom.substring(0, slashIdx);
             if (sub && sub !== 'COMMON' && sub !== 'Board_Model') {
                 activeSet.add(sub);
-                if (outputChannel) {outputChannel.appendLine(`[调试] 从 ${src} -> 活动 UI 子文件夹: ${sub}`);}
+                debugLog(outputChannel, `从 ${src} -> 活动 UI 子文件夹: ${sub}`);
             }
         }
     }
     let activeUISubfolder: string | null = null;
     if (activeSet.size === 1) {
         activeUISubfolder = Array.from(activeSet)[0];
-        if (outputChannel) {outputChannel.appendLine(`[调试] 唯一活动 UI 子文件夹: ${activeUISubfolder}`);}
+        debugLog(outputChannel, `唯一活动 UI 子文件夹: ${activeUISubfolder}`);
     } else if (activeSet.size > 1) {
         if (outputChannel) {outputChannel.appendLine(`[警告] 多个活动 UI 子文件夹: ${Array.from(activeSet).join(', ')}，使用第一个`);}
         activeUISubfolder = Array.from(activeSet)[0];
@@ -60,7 +60,7 @@ export async function handle970X(rootPath: string, outputChannel?: vscode.Output
                 // CUSTOM 下的非活动 UI
                 const customSubRel = path.join(customRel, sub).replace(/\\/g, '/');
                 excludePaths.push(customSubRel);
-                if (outputChannel) {outputChannel.appendLine(`[调试] 排除非活动 CUSTOM UI 子文件夹: ${customSubRel}`);}
+                debugLog(outputChannel, `排除非活动 CUSTOM UI 子文件夹: ${customSubRel}`);
                 // KERNEL/SYSTEM 下的对应文件夹（特殊映射：MTK -> DEMO）
                 if (kernelSystemExists) {
                     let kernelFolderName = sub;
@@ -70,13 +70,13 @@ export async function handle970X(rootPath: string, outputChannel?: vscode.Output
                     const kernelSubRel = path.join(kernelSystemRel, kernelFolderName).replace(/\\/g, '/');
                     if (fs.existsSync(path.join(rootPath, kernelSubRel))) {
                         excludePaths.push(kernelSubRel);
-                        if (outputChannel) {outputChannel.appendLine(`[调试] 同时排除 KERNEL/SYSTEM 下对应文件夹: ${kernelSubRel} (映射自 ${sub})`);}
+                        debugLog(outputChannel, `同时排除 KERNEL/SYSTEM 下对应文件夹: ${kernelSubRel} (映射自 ${sub})`);
                     }
                 }
             }
         }
     } else {
-        if (outputChannel) {outputChannel.appendLine('[调试] 未检测到活动 UI 子文件夹，跳过排除');}
+        debugLog(outputChannel, '未检测到活动 UI 子文件夹，跳过排除');
     }
     if (excludePaths.length > 0) {
         await Promise.all([

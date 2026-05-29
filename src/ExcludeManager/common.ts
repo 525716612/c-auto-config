@@ -4,6 +4,26 @@ import * as fs from "fs";
 import * as yaml from "js-yaml";
 import { spawn } from "child_process";
 
+// ---------- 日志等级工具 ----------
+/** 是否启用调试日志（由 cAutoConfig.debugLogging 控制） */
+function isDebugEnabled(): boolean {
+	return vscode.workspace.getConfiguration("cAutoConfig").get<boolean>("debugLogging", false);
+}
+
+/** 输出调试日志，仅当 cAutoConfig.debugLogging 开启时生效 */
+export function debugLog(outputChannel: vscode.OutputChannel | undefined, message: string): void {
+	if (outputChannel && isDebugEnabled()) {
+		outputChannel.appendLine(`[调试] ${message}`);
+	}
+}
+
+/** 输出普通信息日志（总是显示） */
+export function infoLog(outputChannel: vscode.OutputChannel | undefined, message: string): void {
+	if (outputChannel) {
+		outputChannel.appendLine(message);
+	}
+}
+
 // ---------- 辅助函数 ----------
 export function findRelativeFolder(
 	rootPath: string,
@@ -77,11 +97,7 @@ export function getSourceRelativePaths(
 				: path.resolve(absoluteDir, file);
 			let relative = path.relative(rootPath, absoluteFile).replace(/\\/g, "/");
 			paths.push(relative);
-			if (outputChannel) {
-				outputChannel.appendLine(
-					`[调试] 转换: ${file} (dir: ${dir}) -> ${relative}`,
-				);
-			}
+			debugLog(outputChannel, `转换: ${file} (dir: ${dir}) -> ${relative}`);
 		}
 		return paths;
 	} catch (err) {
@@ -148,7 +164,7 @@ export async function getCompilerBuiltinDefines(
 	return new Promise<string[]>((resolve) => {
 		const cmd = `"${compilerPath.replace(/\\/g, "/")}" -march=aeonR2 -mhard-div -mhard-mul -mredzone-size=4 -O2 -std=c99 -Wp,-v -E -dM -x c /dev/null`;
 		if (outputChannel) {
-			outputChannel.appendLine(`[调试] 执行编译器获取内置宏: ${cmd}`);
+			debugLog(outputChannel, `执行编译器获取内置宏: ${cmd}`);
 		}
 		const child = spawn(bashPath, ["-l", "-c", cmd], {
 			windowsHide: true,
@@ -191,11 +207,7 @@ export async function getCompilerBuiltinDefines(
 					defines.push(define);
 				}
 			}
-			if (outputChannel) {
-				outputChannel.appendLine(
-					`[调试] 编译器内置宏: 共提取 ${defines.length} 个`,
-				);
-			}
+			debugLog(outputChannel, `编译器内置宏: 共提取 ${defines.length} 个`);
 			resolve(defines);
 		});
 
@@ -255,11 +267,7 @@ export async function updateClangdExclude(
 	let addedCount = 0;
 	if (cygwinRoot) {
 		const includePaths = getCygwinIncludePaths(cygwinRoot);
-		if (includePaths.length > 0 && outputChannel) {
-			outputChannel.appendLine(
-				`[调试] 检测到 Cygwin 头文件路径: ${includePaths.join(", ")}`,
-			);
-		}
+		debugLog(outputChannel, `检测到 Cygwin 头文件路径: ${includePaths.join(", ")}`);
 		// 生成每一行，末尾不添加换行符（使用 join）
 		extraIFlags = includePaths
 			.map((p) => `  - '-I${p.replace(/\\/g, "/")}'`)
@@ -274,21 +282,15 @@ export async function updateClangdExclude(
 		if (addLineRegex.test(baseYaml)) {
 			// 替换 "Add:" 为 "Add:\n" + extraIFlags + "\n"
 			baseYaml = baseYaml.replace(addLineRegex, `$1\n${extraIFlags}`);
-			if (outputChannel)
-				{outputChannel.appendLine(
-					`[调试] 已插入 ${addedCount} 个 -I 标志到 .clangd`,
-				);}
+			debugLog(outputChannel, `已插入 ${addedCount} 个 -I 标志到 .clangd`);
 		} else {
 			// 如果没有 Add: 行，则创建 CompileFlags 结构
 			baseYaml += `\nCompileFlags:\n  Add:\n${extraIFlags}\n`;
 			if (outputChannel)
-				{outputChannel.appendLine("[调试] 未找到 Add: 行，已创建并插入 -I 标志");}
+				{debugLog(outputChannel, "未找到 Add: 行，已创建并插入 -I 标志");}
 		}
 	} else {
-		if (outputChannel)
-			{outputChannel.appendLine(
-				"[调试] 未配置 cygwinRoot 或路径无效，不添加 -I 标志",
-			);}
+		debugLog(outputChannel, "未配置 cygwinRoot 或路径无效，不添加 -I 标志");
 	}
 
 	// 添加排除块
@@ -427,7 +429,7 @@ export async function updateSettingsExclude(
     if (cygwinRoot) {
         includePaths = getCygwinIncludePaths(cygwinRoot);
         if (includePaths.length > 0 && outputChannel) {
-            outputChannel.appendLine(`[调试] 设置 C_Cpp.default.systemIncludePath: ${includePaths.join(', ')}`);
+            debugLog(outputChannel, `设置 C_Cpp.default.systemIncludePath: ${includePaths.join(', ')}`);
         }
     }
     for (const incPath of includePaths) {
