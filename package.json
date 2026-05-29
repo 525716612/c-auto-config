@@ -3,7 +3,7 @@
   "displayName": "c auto config",
   "description": "jrymonitorconfig",
   "publisher": "cxy",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "engines": {
     "vscode": "^1.118.0"
   },
@@ -14,7 +14,7 @@
   "type": "git",
   "url": ""
   },
-  "icon": "media/language-c.svg",
+  "icon": "media/language-c.png",
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
