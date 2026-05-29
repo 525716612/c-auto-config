@@ -14,6 +14,7 @@
   "type": "git",
   "url": ""
   },
+  "icon": "media/language-c.svg",
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
