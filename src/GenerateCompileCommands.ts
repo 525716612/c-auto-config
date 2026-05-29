@@ -156,7 +156,7 @@ export async function handleGenerateAction() {
                 outputChannel.appendLine('运行 make -n 捕获编译命令...');
 
                 const makeDirAbs = path.join(rootPath, makefileDir);
-                const shellCmd = `cd "${cygwinMakeDir}" && make clean && make -n`;
+                const shellCmd = `cd "${cygwinMakeDir}"; make clean; make -n`;
 
                 return new Promise<void>((resolve, reject) => {
                     const child = spawn(cygwinBash, ['-l', '-c', shellCmd], { cwd: rootPath });
@@ -181,7 +181,7 @@ export async function handleGenerateAction() {
                     });
 
                     child.on('close', (code) => {
-                        if (code === 0) {
+                        if (stdout.trim()) {
                             try {
                                 const entries = parseMakeOutput(stdout, makeDirAbs);
                                 const outPath = path.join(rootPath, 'compile_commands.json');
@@ -192,7 +192,7 @@ export async function handleGenerateAction() {
                                 reject(new Error(`解析编译命令失败: ${err.message}`));
                             }
                         } else {
-                            reject(new Error(`进程退出码 ${code}`));
+                            reject(new Error(`make -n 未输出任何编译命令（退出码 ${code}）`));
                         }
                     });
 
